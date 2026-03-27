@@ -44,7 +44,13 @@ async function handlePerfectPDF(chatId, text) {
             }
         });
 
-        // 2. Load & Isi Template Excel (Menjaga Gambar Aman)
+        // --- PENYIAPAN NAMA FILE ---
+        // Ambil lokasi, ganti spasi jadi underscore, dan hapus karakter ilegal
+        const lokasiRaw = data["LOKASI"] || "Tanpa_Lokasi";
+        const safeLokasi = lokasiRaw.replace(/[\\/*?:"<>|]/g, "_").replace(/\s+/g, "_");
+        const finalFileName = `BA_Manual_${safeLokasi}.pdf`;
+
+        // 2. Load & Isi Template Excel
         const templatePath = path.join(process.cwd(), 'assets', 'template.xlsx');
         const workbook = new ExcelJS.Workbook();
         await workbook.xlsx.readFile(templatePath);
@@ -81,28 +87,34 @@ async function handlePerfectPDF(chatId, text) {
         }
         workbook.removeWorksheet('code gudang');
 
-        // 3. Simpan ke Buffer (Bukan File Fisik)
+        // 3. Simpan ke Buffer
         const buffer = await workbook.xlsx.writeBuffer();
 
         // 4. Konversi ke PDF via CloudConvert API
         const job = await cloudConvert.jobs.create({
             tasks: {
-                'upload-file': { operation: 'import/base64', file: buffer.toString('base64'), filename: 'BA.xlsx' },
-                'convert-file': { operation: 'convert', input: 'upload-file', output_format: 'pdf' },
+                'upload-file': { operation: 'import/base64', file: buffer.toString('base64'), filename: 'input.xlsx' },
+                'convert-file': { 
+                    operation: 'convert', 
+                    input: 'upload-file', 
+                    output_format: 'pdf',
+                    // Parameter ini memastikan nama file output sesuai keinginan saat diexport
+                    filename: finalFileName 
+                },
                 'export-file': { operation: 'export/url', input: 'convert-file' }
             }
         });
 
-        // Tunggu proses konversi selesai (biasanya 2-5 detik)
         const finishedJob = await cloudConvert.jobs.wait(job.id);
         const exportTask = finishedJob.tasks.filter(t => t.operation === 'export/url' && t.status === 'finished')[0];
         const pdfUrl = exportTask.result.files[0].url;
 
-        // 5. Kirim PDF Kembali ke Telegram via URL (Sangat Cepat)
+        // 5. Kirim PDF ke Telegram
         await axios.post(`${API_URL}/sendDocument`, {
             chat_id: chatId,
             document: pdfUrl,
-            caption: `✅ BA Manual ${data.LOKASI || ''} berhasil dikonversi.`
+            // Kita gunakan caption agar user tahu nama filenya
+            caption: `✅ Berhasil dibuat: ${finalFileName}`
         });
 
     } catch (e) {
