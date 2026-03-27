@@ -1,16 +1,13 @@
 const axios = require('axios');
 const ExcelJS = require('exceljs');
-const { jsPDF } = require('jspdf');
-require('jspdf-autotable');
-const FormData = require('form-data');
 const path = require('path');
+const FormData = require('form-data');
 
 const TOKEN = process.env.TOKEN;
 const API_URL = `https://api.telegram.org/bot${TOKEN}`;
 
 module.exports = async (req, res) => {
-    if (req.method !== 'POST') return res.status(200).send('Bot Node.js Online');
-
+    if (req.method !== 'POST') return res.status(200).send('Bot Active');
     const { message } = req.body;
     if (!message || !message.text) return res.status(200).send('ok');
 
@@ -21,30 +18,17 @@ module.exports = async (req, res) => {
         if (text === '/start') {
             await axios.post(`${API_URL}/sendMessage`, {
                 chat_id: chatId,
-                text: "Hailurrdeeee! Bot Node.js Aktif.\n\n- Ketik ODP... (Gamas)\n- Ketik WH:... (BA Manual)"
+                text: "Hailurrdeeee! Kirim data WH: untuk mengisi template Excel asli Anda."
             });
         } 
-        else if (text.toUpperCase().startsWith('ODP')) {
-            await handleGamas(chatId, text);
-        } 
         else if (text.toUpperCase().includes('WH:')) {
-            await handleBA(chatId, text);
+            await handleExcelTemplate(chatId, text);
         }
-    } catch (error) {
-        console.error("Error utama:", error.message);
-    }
-
+    } catch (e) { console.error(e); }
     return res.status(200).send('ok');
 };
 
-async function handleGamas(chatId, text) {
-    const odc = text.replace(/ODP/g, 'ODC').replace(/\//g, '').replace(/\d/g, '');
-    const sto = odc.split('-')[1]?.substring(0, 3) || '...';
-    const output = `#request\nSTO : ${sto}\nDatek Terdampak (ODC): ${odc}\nDatek Terdampak (ODP): ${text}\nKeterangan: ODC LOSS\nSegmentasi: ODC\nPenyebab: Sedang Dicek\nEstimasi: 1 hari\nPIC: yusuf 08112229796\nClassification: Z_NEW_MANUAL_GAMAS_002_004_001_004`;
-    await axios.post(`${API_URL}/sendMessage`, { chat_id: chatId, text: output });
-}
-
-async function handleBA(chatId, text) {
+async function handleExcelTemplate(chatId, text) {
     try {
         // 1. Parsing Data
         const data = {};
@@ -55,56 +39,55 @@ async function handleBA(chatId, text) {
             }
         });
 
-        // 2. Logika VLOOKUP Gudang (ExcelJS)
-        let idGudang = data["WH"] || "";
+        // 2. Load Template Asli
         const templatePath = path.join(process.cwd(), 'assets', 'template.xlsx');
-        
         const workbook = new ExcelJS.Workbook();
         await workbook.xlsx.readFile(templatePath);
-        const sheet = workbook.getWorksheet('code gudang');
         
-        sheet.eachRow((row) => {
+        const wsBA = workbook.getWorksheet('BA');
+        const wsCode = workbook.getWorksheet('code gudang');
+
+        // 3. Logika VLOOKUP Gudang
+        let idGudang = data["WH"] || "";
+        wsCode.eachRow((row) => {
             if (row.getCell(2).value?.toString().toUpperCase() === idGudang.toUpperCase()) {
                 idGudang = `${row.getCell(1).value} ${row.getCell(2).value}`;
             }
         });
 
-        // 3. Generate PDF (jsPDF)
-        const doc = new jsPDF();
-        doc.setFontSize(14);
-        doc.text("BERITA ACARA PENGAMBILAN MATERIAL", 105, 20, { align: 'center' });
-        
-        doc.setFontSize(10);
-        doc.text(`ID GUDANG : ${idGudang}`, 20, 40);
-        doc.text(`TANGGAL   : ${data.TGL || '-'}`, 20, 47);
-        doc.text(`LOKASI    : ${data.LOKASI || '-'}`, 20, 54);
-        doc.text(`MITRA     : ${data.MITRA || '-'}`, 20, 61);
+        // 4. Isi Sel Spesifik (Sama dengan Logika Python Anda)
+        wsBA.getCell('D12').value = idGudang;
+        wsBA.getCell('D13').value = data["TGL"] || "";
+        wsBA.getCell('D15').value = data["LOKASI"] || "";
+        wsBA.getCell('D16').value = data["MITRA"] || "";
 
-        // 4. Extract Materials & Logic Satuan
-        const tableRows = [];
+        // 5. Isi Tabel Material (B21:F32)
         const materialRegex = /-\s*(.*?)\s*=\s*(\d+)/g;
-        let match, i = 1;
-        while ((match = materialRegex.exec(text)) !== null) {
-            const nm = match[1].toUpperCase();
-            let sat = "Pcs";
-            if (nm.includes("AC-OF-SM-ADSS")) sat = "Meter";
-            else if (nm.includes("PU-S7.0-400NM") || nm.includes("PU-S9.0-140")) sat = "Batang";
+        let match, i = 0;
+        while ((match = materialRegex.exec(text)) && i < 12) {
+            const rowNum = 21 + i;
+            const nm = match[1];
+            const qty = parseInt(match[2]);
             
-            tableRows.push([i++, match[1], sat, match[2]]);
+            let sat = "Pcs";
+            if (nm.toUpperCase().includes("AC-OF-SM-ADSS")) sat = "Meter";
+            else if (nm.toUpperCase().includes("PU-S7.0-400NM") || nm.toUpperCase().includes("PU-S9.0-140")) sat = "Batang";
+
+            wsBA.getCell(`B${rowNum}`).value = nm;
+            wsBA.getCell(`D${rowNum}`).value = sat;
+            wsBA.getCell(`E${rowNum}`).value = qty;
+            wsBA.getCell(`F${rowNum}`).value = qty;
+            i++;
         }
 
-        doc.autoTable({
-            startY: 70,
-            head: [['No', 'Nama Material', 'Satuan', 'Qty']],
-            body: tableRows,
-            theme: 'grid'
-        });
+        // 6. Hapus Sheet Code Gudang agar bersih
+        workbook.removeWorksheet('code gudang');
 
-        // 5. Kirim ke Telegram
-        const pdfData = doc.output('arraybuffer');
+        // 7. Generate Buffer & Kirim (Tetap dalam format .xlsx agar gambar aman)
+        const buffer = await workbook.xlsx.writeBuffer();
         const form = new FormData();
         form.append('chat_id', chatId);
-        form.append('document', Buffer.from(pdfData), { filename: `BA_${data.LOKASI || 'Manual'}.pdf` });
+        form.append('document', buffer, { filename: `BA_${data.LOKASI || 'Manual'}.xlsx` });
 
         await axios.post(`${API_URL}/sendDocument`, form, { headers: form.getHeaders() });
 
