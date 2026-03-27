@@ -1,66 +1,35 @@
 import os
-import re
-import openpyxl
+import requests
 from flask import Flask, request
-import telegram
 
 app = Flask(__name__)
 
-# Ambil TOKEN dari Environment Variables Vercel
+# Ambil TOKEN dari Environment Variables
 TOKEN = os.environ.get('TOKEN')
-bot = telegram.Bot(token=TOKEN)
+TELEGRAM_API = f"https://api.telegram.org/bot{TOKEN}"
+
+def send_message(chat_id, text):
+    url = f"{TELEGRAM_API}/sendMessage"
+    payload = {"chat_id": chat_id, "text": text}
+    requests.post(url, json=payload)
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
     if request.method == "POST":
-        try:
-            update = telegram.Update.de_json(request.get_json(force=True), bot)
-            if not update.message:
-                return 'ok'
-                
-            chat_id = update.message.chat.id
-            text = update.message.text
+        data = request.get_json()
+        
+        # Cek jika ada pesan masuk
+        if "message" in data:
+            chat_id = data["message"]["chat"]["id"]
+            text = data["message"].get("text", "")
 
             if text == "/start":
-                bot.send_message(chat_id=chat_id, text="Bot Aktif! Kirim data material dengan format 'WH: ...' untuk mencoba.")
-            
-            # LOGIKA PROSES EXCEL
-            elif "WH:" in text.upper():
-                bot.send_message(chat_id=chat_id, text="⏳ Sedang memproses file Excel...")
-                
-                # Path template (Pastikan file template.xlsx ada di folder assets)
-                template_path = os.path.join(os.getcwd(), 'assets', 'template.xlsx')
-                
-                if not os.path.exists(template_path):
-                    bot.send_message(chat_id=chat_id, text="❌ Error: File assets/template.xlsx tidak ditemukan di server.")
-                    return 'ok'
-
-                wb = openpyxl.load_workbook(template_path)
-                ws = wb["BA"]
-                
-                # Contoh: Isi data sederhana dari baris pertama input user ke sel D15
-                lines = text.split('\n')
-                ws['D15'] = lines[0] 
-                
-                # Simpan di folder sementara Vercel
-                temp_file = "/tmp/Hasil_BA.xlsx"
-                wb.save(temp_file)
-                
-                # Kirim ke user
-                with open(temp_file, 'rb') as f:
-                    bot.send_document(chat_id=chat_id, document=f, filename="Hasil_BA_Manual.xlsx")
-                
-                os.remove(temp_file)
-            
+                send_message(chat_id, "✅ Bot BERHASIL Aktif di Vercel tanpa library berat! Kirim pesan apapun untuk tes.")
             else:
-                bot.send_message(chat_id=chat_id, text=f"Anda mengirim: {text}")
-
-        except Exception as e:
-            # Jika ada error di tengah jalan, bot akan lapor ke Anda
-            print(f"Error: {e}")
-            
-        return 'ok'
+                send_message(chat_id, f"Bot menerima pesan: {text}")
+                
+        return "ok", 200
 
 @app.route('/')
 def index():
-    return "TEST BERHASIL: Server Vercel Berjalan!"
+    return "Bot Server is Running", 200
