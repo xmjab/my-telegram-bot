@@ -8,6 +8,8 @@ const TOKEN = process.env.TOKEN;
 const CLOUDCONVERT_KEY = process.env.CLOUDCONVERT_API_KEY;
 const API_URL = `https://api.telegram.org/bot${TOKEN}`;
 
+// Menghapus spasi putih yang mungkin terbawa dari Environment Variables
+const CLOUDCONVERT_KEY = process.env.CLOUDCONVERT_API_KEY ? process.env.CLOUDCONVERT_API_KEY.trim() : "";
 const cloudConvert = new CloudConvert(CLOUDCONVERT_KEY);
 
 module.exports = async (req, res) => {
