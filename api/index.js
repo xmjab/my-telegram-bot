@@ -113,8 +113,6 @@ async function handlePerfectPDF(chatId, text) {
         await axios.post(`${API_URL}/sendDocument`, {
             chat_id: chatId,
             document: pdfUrl,
-            // Kita gunakan caption agar user tahu nama filenya
-            caption: `✅ Berhasil dibuat: ${finalFileName}`
         });
 
     } catch (e) {
